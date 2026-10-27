@@ -109,6 +109,14 @@ button { cursor: pointer; }
 .picker button { border: 0; background: transparent; border-radius: 7px; padding: 6px 8px; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; }
 .picker button:hover { background: var(--desk); }
 .picker button.cur { box-shadow: inset 0 0 0 2px var(--accent); }
+.picker #pickJoin { border-left: 1px solid var(--rule); border-radius: 0; }
+.picker.docked { left: 50% !important; top: auto !important; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); }
+.picker .tray { font-size: 12.5px; padding: 6px 10px 6px 6px; color: var(--muted); align-self: center; border-right: 1px solid var(--rule); white-space: nowrap; }
+.picker .tray b { color: var(--accent); }
+.picker #pickCancel { color: var(--muted); border-left: 1px solid var(--rule); border-radius: 0 7px 7px 0; }
+.hl.pendingpart { background: rgba(43, 95, 124, .12); outline: 1.5px dashed var(--accent); outline-offset: 1px; mix-blend-mode: normal; }
+.picker #pickJoin .num { background: var(--accent); }
+.picker #pickUnpart { border-left: 1px solid var(--rule); border-radius: 0; color: var(--muted); }
 .picker #pickDel { color: var(--c-r); border-left: 1px solid var(--rule); border-radius: 0 7px 7px 0; }
 .sw { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
 .sw.y { background: var(--c-y); } .sw.b { background: var(--c-b); } .sw.o { background: var(--c-o); } .sw.r { background: var(--c-r); }
@@ -223,7 +231,7 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
       <p class="banner" id="exampleBanner" hidden>Đây là bài mẫu để bạn xem cách dùng. Bạn sửa, xoá thoải mái, hoặc tải bài báo của bạn lên.</p>
       <p class="banner warn" id="localBanner" hidden>Chế độ tạm: ghi chú chỉ nằm trong tab này và sẽ mất khi đóng trang. Vào tab Tóm tắt để tải file ghi chú về máy.</p>
       <div id="notes"></div>
-      <p class="hint" id="notesHint">Bôi đen một đoạn chữ trong bài rồi chọn màu. Muốn tô hình, bảng hoặc công thức thì bật “Tô theo khung” rồi kéo một khung.</p>
+      <p class="hint" id="notesHint">Bôi đen một đoạn chữ trong bài rồi chọn màu. Muốn gom nhiều đoạn vào một ghi chú: giữ ⌘ (Mac) hoặc Ctrl trong lúc bôi từng đoạn, xong chọn màu một lần. Muốn tô hình, bảng hoặc công thức thì bật “Tô theo khung” rồi kéo một khung.</p>
     </div>
     <div class="tabpanel" role="tabpanel" id="panel-frame" aria-labelledby="tab-frame" hidden>
       <div class="q"><label for="titleIn">Tên bài báo</label><input id="titleIn" class="titlein" type="text"></div>
@@ -262,7 +270,11 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
   <button type="button" data-c="b"><i class="sw b"></i>Cách làm</button>
   <button type="button" data-c="o"><i class="sw o"></i>Kết quả</button>
   <button type="button" data-c="r"><i class="sw r"></i>Hạn chế</button>
+  <span class="tray" id="pickTray" hidden><b id="pickTrayN">0</b> đoạn đang chờ</span>
+  <button type="button" data-act="join" id="pickJoin" hidden>＋ Gộp vào <span class="num" id="pickJoinNum"></span></button>
+  <button type="button" data-act="unpart" id="pickUnpart" hidden>Bỏ đoạn này</button>
   <button type="button" data-act="del" id="pickDel" hidden>✕ Xoá</button>
+  <button type="button" data-act="cancel" id="pickCancel" hidden>Huỷ</button>
 </div>
 <div class="toast" id="toast" hidden></div>
 
@@ -541,6 +553,10 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
   }
 
   // ---------- highlights on pages ----------
+  // A highlight is one note with one or more highlighted parts: the main part (page/rects/text) plus `extra` parts.
+  const segments = (h) => [{ page: h.page, rects: h.rects, text: h.text, part: 0 }, ...(h.extra || []).map((x, k) => ({ ...x, part: k + 1 }))];
+  const fullText = (h) => segments(h).map((x) => x.text).filter(Boolean).join(" … ");
+  const pagesOf = (h) => [...new Set(segments(h).map((x) => x.page))].sort((a, b) => a - b);
   const sorted = () => hls.slice().sort((a, b) => (a.page - b.page) || ((a.y ?? 0.5) - (b.y ?? 0.5)) || ((a.createdAt || 0) - (b.createdAt || 0)));
   function numbering() { const m = {}; sorted().forEach((h, k) => (m[h.id] = k + 1)); return m; }
   function drawAllHighlights() {
@@ -548,13 +564,16 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     [...$("pages").children].forEach((el, i) => {
       const layer = el.querySelector(".hl-layer"); if (!layer) return;
       let html = "";
-      hls.filter((h) => h.page === i + 1 && h.rects).forEach((h) => {
+      hls.forEach((h) => segments(h).filter((sg) => sg.page === i + 1 && sg.rects && sg.rects.length).forEach((sg) => {
         const dim = filter !== "all" && h.color !== filter ? " dim" : "";
         const fl = h.id === activeId ? " flash" : "";
-        h.rects.forEach(([x, y, w, hh]) => { html += `<div class="hl ${h.color}${dim}${fl}" data-id="${h.id}" style="left:${x * 100}%;top:${y * 100}%;width:${w * 100}%;height:${hh * 100}%"></div>`; });
-        const [x, y] = h.rects[0];
+        sg.rects.forEach(([x, y, w, hh]) => { html += `<div class="hl ${h.color}${dim}${fl}" data-id="${h.id}" data-part="${sg.part}" style="left:${x * 100}%;top:${y * 100}%;width:${w * 100}%;height:${hh * 100}%"></div>`; });
+        const [x, y] = sg.rects[0];
         html += `<span class="hl-badge ${h.color}${dim}" style="left:${x * 100}%;top:${y * 100}%">${nums[h.id]}</span>`;
-      });
+      }));
+      tray.filter((t) => t.page === i + 1).forEach((t) => t.rects.forEach(([x, y, w, hh]) => {
+        html += `<div class="hl pendingpart" style="left:${x * 100}%;top:${y * 100}%;width:${w * 100}%;height:${hh * 100}%"></div>`;
+      }));
       layer.innerHTML = html;
     });
   }
@@ -569,15 +588,15 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
   function area(rs) { return rs.reduce((a, r) => a + r[2] * r[3], 0); }
   function overlapping(p) {
     let best = null, bestScore = 0;
-    hls.filter((h) => h.page === p.page && h.rects).forEach((h) => {
+    hls.forEach((h) => segments(h).filter((sg) => sg.page === p.page && sg.rects).forEach((sg) => {
       let inter = 0;
-      h.rects.forEach(([x1, y1, w1, h1]) => p.rects.forEach(([x2, y2, w2, h2]) => {
+      sg.rects.forEach(([x1, y1, w1, h1]) => p.rects.forEach(([x2, y2, w2, h2]) => {
         const w = Math.min(x1 + w1, x2 + w2) - Math.max(x1, x2), hh = Math.min(y1 + h1, y2 + h2) - Math.max(y1, y2);
         if (w > 0 && hh > 0) inter += w * hh;
       }));
-      const score = inter / Math.max(1e-9, Math.min(area(h.rects), area(p.rects)));
+      const score = inter / Math.max(1e-9, Math.min(area(sg.rects), area(p.rects)));
       if (score > bestScore) { bestScore = score; best = h; }
-    });
+    }));
     return bestScore > 0.6 ? best : null;
   }
   function setColor(id, c) {
@@ -593,6 +612,21 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     hls = hls.filter((x) => x.id !== id); onHlChange();
     store.deleteHl(current.id, id);
   }
+  function addPart(id, pd) {
+    const h = hls.find((x) => x.id === id); if (!h || !current) return;
+    const extra = [...(h.extra || []), ...[].concat(pd).map((x) => ({ page: x.page, rects: x.rects, text: x.text.slice(0, 2000) }))];
+    hls = hls.map((x) => (x.id === id ? { ...x, extra } : x)); onHlChange();
+    store.updateHl(current.id, id, { extra });
+  }
+  function removePart(id, part) {
+    const h = hls.find((x) => x.id === id); if (!h || !current) return;
+    const segs = segments(h).filter((sg) => sg.part !== part);
+    if (!segs.length) { deleteHl(id); return; }
+    const [main, ...rest] = segs;
+    const patch = { page: main.page, rects: main.rects, text: main.text, y: main.rects && main.rects.length ? main.rects[0][1] : (h.y ?? 0.5), extra: rest.map(({ page, rects, text }) => ({ page, rects, text })) };
+    hls = hls.map((x) => (x.id === id ? { ...x, ...patch } : x)); onHlChange();
+    store.updateHl(current.id, id, patch);
+  }
   function saveNote(id) {
     clearTimeout(noteTimers[id]);
     if (drafts[id] === undefined || !current) return;
@@ -602,8 +636,32 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
 
   // ---------- creating highlights ----------
   let pending = null; // {page, rects, text}
-  function showPicker(rectClient, editId) {
+  // Parts selected while holding ⌘/Ctrl wait here until one colour (or "join") applies to all of them.
+  let tray = [];
+  const collecting = (e) => !!(e && (e.metaKey || e.ctrlKey)) || tray.length > 0;
+  function setJoin() {
+    const joinTo = activeId && hls.find((h) => h.id === activeId);
+    $("pickJoin").hidden = !joinTo;
+    if (joinTo) { const n = numbering()[joinTo.id]; $("pickJoinNum").textContent = n; $("pickJoinNum").className = "num " + joinTo.color; $("pickJoin").title = `Thêm vào ghi chú số ${n}, dùng chung một số và một ghi chú`; }
+  }
+  function addToTray(part) {
+    tray.push(part); pending = null;
+    const p = $("picker"); p.classList.add("docked"); p.style.left = ""; p.style.top = "";
+    $("pickTray").hidden = false; $("pickTrayN").textContent = tray.length; $("pickCancel").hidden = false;
+    $("pickDel").hidden = true; $("pickUnpart").hidden = true; setJoin();
+    p.querySelectorAll("button[data-c]").forEach((b) => b.classList.remove("cur"));
+    p.hidden = false; drawAllHighlights();
+  }
+  function clearTray() {
+    tray = []; const p = $("picker"); p.classList.remove("docked");
+    $("pickTray").hidden = true; $("pickCancel").hidden = true; p.hidden = true; pending = null; drawAllHighlights();
+  }
+  function showPicker(rectClient, editId, part) {
     const p = $("picker"); $("pickDel").hidden = !editId;
+    p.classList.remove("docked"); $("pickTray").hidden = true; $("pickCancel").hidden = true;
+    const edited = editId && hls.find((h) => h.id === editId);
+    $("pickUnpart").hidden = !(edited && segments(edited).length > 1);
+    if (editId) $("pickJoin").hidden = true; else setJoin();
     const curColor = editId && (hls.find((h) => h.id === editId) || {}).color;
     p.querySelectorAll("button[data-c]").forEach((b) => b.classList.toggle("cur", b.dataset.c === curColor));
     p.hidden = false;
@@ -612,8 +670,8 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     let top = rectClient.top - h - 8; if (top < 8) top = rectClient.bottom + 8;
     p.style.left = left + "px"; p.style.top = top + "px";
   }
-  function hidePicker() { $("picker").hidden = true; pending = null; }
-  function captureSelection() {
+  function hidePicker() { if (tray.length) return; $("picker").hidden = true; pending = null; }
+  function captureSelection(e) {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
     const range = sel.getRangeAt(0);
@@ -623,31 +681,56 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     const raw = [...range.getClientRects()].filter((r) => r.top < pb.bottom && r.bottom > pb.top);
     const merged = mergeRects(raw); if (!merged.length) return false;
     const text = sel.toString().replace(/\s+/g, " ").trim(); if (!text) return false;
-    pending = { page: +pageEl.dataset.i + 1, rects: normRects(merged, pageEl), text };
+    const part = { page: +pageEl.dataset.i + 1, rects: normRects(merged, pageEl), text };
+    if (collecting(e)) { addToTray(part); sel.removeAllRanges(); return true; }
+    pending = part;
     const last = merged[merged.length - 1];
     showPicker({ left: last.l, top: merged[0].t, width: last.r - last.l, bottom: last.b });
     return true;
   }
-  $("viewer").addEventListener("mouseup", () => setTimeout(() => { if (!areaMode && !captureSelection()) maybeClickHighlight(); }, 0));
+  $("viewer").addEventListener("mouseup", (e) => setTimeout(() => { if (!areaMode && !captureSelection(e)) maybeClickHighlight(); }, 0));
   $("viewer").addEventListener("touchend", () => setTimeout(() => { if (!areaMode) captureSelection(); }, 250));
   let lastPointer = null;
   $("viewer").addEventListener("pointerdown", (e) => { lastPointer = [e.clientX, e.clientY]; if (!$("picker").contains(e.target)) hidePicker(); });
   function maybeClickHighlight() {
-    if (!lastPointer) return;
+    if (!lastPointer || tray.length) return;
     const [cx, cy] = lastPointer;
-    for (const el of document.querySelectorAll(".hl")) {
+    for (const el of document.querySelectorAll(".hl[data-id]")) {
       const r = el.getBoundingClientRect();
       if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) {
-        const id = el.dataset.id; focusNote(id, false);
-        pending = { editId: id }; showPicker(r, id); return;
+        const id = el.dataset.id, part = +(el.dataset.part || 0); focusNote(id, false);
+        pending = { editId: id, part }; showPicker(r, id, part); return;
       }
     }
   }
   $("picker").addEventListener("mousedown", (e) => e.preventDefault());
   $("viewer").addEventListener("scroll", () => { if (!$("picker").hidden) hidePicker(); }, { passive: true });
   $("picker").addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-c], button[data-act]"); if (!b || !pending || !current) return;
+    const b = e.target.closest("button[data-c], button[data-act]"); if (!b || !current) return;
+    if (tray.length) {
+      const parts = tray.slice();
+      if (b.dataset.act === "cancel") { clearTray(); return; }
+      if (b.dataset.act === "join") {
+        if (!activeId) return;
+        const target = activeId; addPart(target, parts); clearTray();
+        toast(`Đã gộp ${parts.length} đoạn vào ghi chú số ${numbering()[target]}`); focusNote(target, false); return;
+      }
+      if (!b.dataset.c) return;
+      const [m, ...rest] = parts;
+      const id = store.addHl(current.id, { color: b.dataset.c, page: m.page, rects: m.rects, y: m.rects[0][1], text: m.text.slice(0, 2000), note: "", createdAt: Date.now(),
+        extra: rest.map((x) => ({ page: x.page, rects: x.rects, text: x.text.slice(0, 2000) })) });
+      clearTray(); focusAfter = id; selectTab("notes"); setTimeout(() => focusNote(id, true), 60);
+      if (parts.length > 1) toast(`Đã tạo 1 ghi chú gồm ${parts.length} đoạn`);
+      return;
+    }
+    if (!pending) return;
     if (b.dataset.act === "del") { if (pending.editId) deleteHl(pending.editId); hidePicker(); return; }
+    if (b.dataset.act === "unpart") { if (pending.editId) removePart(pending.editId, pending.part || 0); hidePicker(); return; }
+    if (b.dataset.act === "join") {
+      if (!pending.rects || !activeId) return;
+      const target = activeId; window.getSelection().removeAllRanges(); addPart(target, pending); hidePicker();
+      toast(`Đã gộp vào ghi chú số ${numbering()[target]}`); focusNote(target, false); return;
+    }
     const c = b.dataset.c;
     if (pending.editId) { setColor(pending.editId, c); hidePicker(); return; }
     // Re-selecting text that is already highlighted changes its colour instead of stacking a second highlight.
@@ -658,7 +741,7 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     hidePicker(); focusAfter = id;
     selectTab("notes"); setTimeout(() => focusNote(id, true), 60);
   });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hidePicker(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (tray.length) clearTray(); else hidePicker(); } });
 
   // area mode
   function bindArea(pageEl, i) {
@@ -683,7 +766,9 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
       const tl = pageEl.querySelector(".textLayer");
       let text = "";
       if (tl) text = [...tl.querySelectorAll("span")].filter((s) => { const q = s.getBoundingClientRect(); return q.left >= r.l - 2 && q.right <= r.r + 2 && q.top >= r.t - 2 && q.bottom <= r.b + 2; }).map((s) => s.textContent).join(" ").replace(/\s+/g, " ").trim();
-      pending = { page: i + 1, rects: normRects([r], pageEl), text: text ? text : `[Khung trên trang ${i + 1}]` };
+      const part = { page: i + 1, rects: normRects([r], pageEl), text: text ? text : `[Khung trên trang ${i + 1}]` };
+      if (collecting(e)) { addToTray(part); return; }
+      pending = part;
       showPicker({ left: r.l, top: r.t, width: r.r - r.l, bottom: r.b });
     });
   }
@@ -739,9 +824,10 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
       }
       el.className = `note ${h.color}${h.id === activeId ? " active" : ""}`;
       el.querySelector(".num").className = `num ${h.color}`; el.querySelector(".num").textContent = nums[h.id];
-      el.querySelector(".pg").textContent = `tr. ${h.page} · ${COLORS[h.color].role}`;
+      const nParts = segments(h).length;
+      el.querySelector(".pg").textContent = `tr. ${pagesOf(h).join(", ")} · ${COLORS[h.color].role}${nParts > 1 ? ` · ${nParts} đoạn` : ""}`;
       el.querySelectorAll(".dot").forEach((d) => d.setAttribute("aria-pressed", String(d.dataset.c === h.color)));
-      el.querySelector(".quote").textContent = "“" + h.text + "”";
+      el.querySelector(".quote").textContent = "“" + fullText(h) + "”";
       el.querySelector(".unanchored").hidden = !!h.rects;
       const ta = el.querySelector("textarea"); ta.placeholder = COLORS[h.color].ph;
       if (document.activeElement !== ta && drafts[h.id] === undefined && ta.value !== (h.note || "")) ta.value = h.note || "";
@@ -876,7 +962,7 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     Object.keys(COLORS).forEach((c) => {
       const items = s.filter((h) => h.color === c); if (!items.length) return;
       md += `## ${COLORS[c].role}\n\n`;
-      items.forEach((h) => { md += `${nums[h.id]}. (tr. ${h.page}) “${h.text}”` + (h.note ? `\n   → ${h.note}` : "") + "\n"; });
+      items.forEach((h) => { md += `${nums[h.id]}. (tr. ${pagesOf(h).join(", ")}) “${fullText(h)}”` + (h.note ? `\n   → ${h.note}` : "") + "\n"; });
       md += "\n";
     });
     return md;
@@ -891,7 +977,7 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     Object.keys(COLORS).forEach((c) => {
       const items = s.filter((h) => h.color === c);
       html += `<h3><i class="sw ${c}"></i>${COLORS[c].role} <span class="hint">(${items.length})</span></h3>`;
-      html += items.length ? `<ol>${items.map((h) => `<li value="${nums[h.id]}"><span class="qt">“${esc(h.text)}”</span> <span class="hint">tr. ${h.page}</span>${h.note ? `<br><span class="nt">→ ${esc(h.note)}</span>` : ""}</li>`).join("")}</ol>` : `<p class="hint">Chưa có. Mục trống là phần bạn nên đọc lại.</p>`;
+      html += items.length ? `<ol>${items.map((h) => `<li value="${nums[h.id]}"><span class="qt">“${esc(fullText(h))}”</span> <span class="hint">tr. ${pagesOf(h).join(", ")}</span>${h.note ? `<br><span class="nt">→ ${esc(h.note)}</span>` : ""}</li>`).join("")}</ol>` : `<p class="hint">Chưa có. Mục trống là phần bạn nên đọc lại.</p>`;
     });
     box.innerHTML = html;
   }
@@ -913,7 +999,7 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
   // The notes format shared by the .json export and the data embedded in an exported PDF.
   function notesData() {
     return { app: "so-doc-bai-bao", version: 1, paper: { title: current.title, fileName: current.fileName, q: current.q || {} },
-      highlights: sorted().map(({ color, page, rects, y, text, note, createdAt }) => ({ color, page, rects: rects || null, y: y ?? null, text, note, createdAt })) };
+      highlights: sorted().map(({ color, page, rects, y, text, note, createdAt, extra }) => ({ color, page, rects: rects || null, y: y ?? null, text, note, createdAt, extra: extra || [] })) };
   }
   async function applyNotes(pid, data) {
     if (!data || !Array.isArray(data.highlights)) throw new Error("format");
@@ -921,7 +1007,9 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     let n = 0;
     for (const h of data.highlights) {
       if (!COLORS[h.color] || typeof h.page !== "number") continue;
-      store.addHl(pid, { color: h.color, page: h.page, rects: Array.isArray(h.rects) ? h.rects : null, y: typeof h.y === "number" ? h.y : 0.5, text: String(h.text || "").slice(0, 2000), note: String(h.note || ""), createdAt: h.createdAt || Date.now() });
+      const extra = (Array.isArray(h.extra) ? h.extra : []).filter((x) => x && typeof x.page === "number" && Array.isArray(x.rects))
+        .map((x) => ({ page: x.page, rects: x.rects, text: String(x.text || "").slice(0, 2000) }));
+      store.addHl(pid, { color: h.color, page: h.page, rects: Array.isArray(h.rects) ? h.rects : null, y: typeof h.y === "number" ? h.y : 0.5, text: String(h.text || "").slice(0, 2000), note: String(h.note || ""), createdAt: h.createdAt || Date.now(), extra });
       n++;
     }
     return n;
@@ -978,7 +1066,9 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
       let fR, fB, unicode = false;
       if (regBytes && boldBytes && window.fontkit) {
         doc.registerFontkit(window.fontkit);
-        fR = await doc.embedFont(regBytes); fB = await doc.embedFont(boldBytes); unicode = true;
+        // ligatures off: otherwise "ff"/"fi" become one glyph and copy out of the PDF as a wrong character
+        const opts = { features: { liga: false, clig: false } };
+        fR = await doc.embedFont(regBytes, opts); fB = await doc.embedFont(boldBytes, opts); unicode = true;
       } else {
         fR = await doc.embedFont(StandardFonts.Helvetica); fB = await doc.embedFont(StandardFonts.HelveticaBold);
       }
@@ -988,6 +1078,8 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
         if (c === "\n") return c;
         if (charset.has(c.codePointAt(0))) return c;
         if (GREEK[c]) return GREEK[c];
+        const k = c.normalize("NFKC"); // ligatures such as ﬁ, ﬀ become plain letters
+        if (k !== c && [...k].every((ch) => charset.has(ch.codePointAt(0)))) return k;
         const base = c.normalize("NFD")[0];
         if (base && charset.has(base.codePointAt(0))) return base;
         if (c === "đ") return "d"; if (c === "Đ") return "D";
@@ -1016,19 +1108,27 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
       let overflow = false;
 
       doc.getPages().forEach((page, p) => {
-        const list = all.filter((h) => h.page === p + 1);
-        if (!list.length) return;
+        const onPage = all.filter((h) => segments(h).some((sg) => sg.page === p + 1));
+        if (!onPage.length) return;
+        // margin entries: the full note on the main part's page, a pointer back to it on pages that only hold extra parts
+        const list = [];
+        onPage.forEach((h) => {
+          if (h.page === p + 1) { list.push({ h, top: h.rects ? h.rects[0][1] : null, body: null }); return; }
+          const sg = segments(h).find((x) => x.page === p + 1);
+          list.push({ h, top: sg.rects && sg.rects.length ? sg.rects[0][1] : null, body: `Cùng ý với ghi chú ${nums[h.id]} ở trang ${h.page}.` });
+        });
+        list.sort((a, b) => (a.top ?? 2) - (b.top ?? 2));
         const rot = ((page.getRotation().angle % 360) + 360) % 360;
         const cb = page.getCropBox();
         if (rot === 0) {
-          list.filter((h) => h.rects).forEach((h) => {
-            h.rects.forEach(([x, y, w, hh]) => page.drawRectangle({ x: cb.x + x * cb.width, y: cb.y + cb.height - (y + hh) * cb.height, width: w * cb.width, height: hh * cb.height, color: C(PDF_FILL[h.color]), opacity: 0.38, blendMode: BlendMode.Multiply }));
-            const [x, y] = h.rects[0];
+          onPage.forEach((h) => segments(h).filter((sg) => sg.page === p + 1 && sg.rects && sg.rects.length).forEach((sg) => {
+            sg.rects.forEach(([x, y, w, hh]) => page.drawRectangle({ x: cb.x + x * cb.width, y: cb.y + cb.height - (y + hh) * cb.height, width: w * cb.width, height: hh * cb.height, color: C(PDF_FILL[h.color]), opacity: 0.38, blendMode: BlendMode.Multiply }));
+            const [x, y] = sg.rects[0];
             const bx = Math.max(cb.x + 6, cb.x + x * cb.width - 7), by = cb.y + cb.height - y * cb.height - 4;
             page.drawCircle({ x: bx, y: by, size: 5.5, color: C(PDF_INK[h.color]) });
             const label = String(nums[h.id]); const s = 6.5;
             page.drawText(label, { x: bx - fB.widthOfTextAtSize(label, s) / 2, y: by - s * 0.35, size: s, font: fB, color: rgb(1, 1, 1) });
-          });
+          }));
         }
         if (rot !== 0) return; // rotated pages keep their highlights only in the summary pages
         // widen the page and write the notes in the new right-hand margin
@@ -1040,10 +1140,11 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
         page.drawText(clean("Ghi chú"), { x: mx + 12, y: cb.y + cb.height - 22, size: 9, font: fB, color: rgb(0.36, 0.42, 0.47) });
         const tx = mx + 26, tw = M - 38, size = 7.6, lh = 10;
         let cursor = cb.y + cb.height - 34;
-        for (const h of list) {
-          const want = h.rects ? cb.y + cb.height - h.rects[0][1] * cb.height : cursor;
+        for (const entry of list) {
+          const h = entry.h, ft = fullText(h);
+          const want = entry.top !== null ? cb.y + cb.height - entry.top * cb.height : cursor;
           const top = Math.min(want, cursor);
-          const body = h.note ? h.note : "“" + (h.text.length > 140 ? h.text.slice(0, 140) + "…" : h.text) + "”";
+          const body = entry.body || (h.note ? h.note : "“" + (ft.length > 140 ? ft.slice(0, 140) + "…" : ft) + "”");
           const lines = wrap(body, fR, size, tw);
           const height = lines.length * lh;
           if (top - height < cb.y + 22) {
@@ -1081,7 +1182,7 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
         pg.drawText(clean(COLORS[c].role), { x: L + 15, y: y - 10.5, size: 12, font: fB, color: rgb(0.1, 0.14, 0.17) });
         y -= 20;
         items.forEach((h) => {
-          text(`${nums[h.id]}. (tr. ${h.page}) “${h.text}”`, { size: 9.2, color: rgb(0.25, 0.3, 0.35) });
+          text(`${nums[h.id]}. (tr. ${pagesOf(h).join(", ")}) “${fullText(h)}”`, { size: 9.2, color: rgb(0.25, 0.3, 0.35) });
           if (h.note) text("→ " + h.note, { size: 9.5, indent: 12, color: C(PDF_INK[c]) });
           y -= 5;
         });
