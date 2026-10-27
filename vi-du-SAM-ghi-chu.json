@@ -1,0 +1,136 @@
+{
+  "app": "so-doc-bai-bao",
+  "version": 1,
+  "paper": {
+    "title": "Sharpness-Aware Minimization (SAM)",
+    "fileName": "1839_sharpness_aware_minimization_f.pdf",
+    "q": {
+      "problem": "Tìm tham số mạng nơ-ron tổng quát hóa tốt, không chỉ có loss train thấp.",
+      "motivation": "Nhiều cực tiểu có loss train gần bằng nhau nhưng loss test khác nhau. Cực tiểu phẳng thường tốt hơn, nhưng chưa có thuật toán hiệu quả chủ động tìm chúng.",
+      "io": "Vào: dữ liệu, hàm loss, learning rate η, bán kính ρ. Ra: trọng số nằm ở vùng loss thấp và phẳng.",
+      "method": "g = ∇L(w) → ε̂ = ρ·g/‖g‖ → tính gradient tại w + ε̂ → cập nhật w bằng gradient đó.",
+      "evidence": "CIFAR-10: lỗi 2.2% → 1.6%. ImageNet ResNet-152: 20.3% → 18.4%. Hessian λ_max ≈ 24 (SGD) so với ≈ 1 (SAM).",
+      "conclusion": "Giảm đồng thời loss và độ nhọn giúp tổng quát hóa tốt hơn, chỉ thêm một siêu tham số ρ.",
+      "future": "Vì sao bỏ số hạng bậc 2 lại tốt hơn? m-sharpness có thể giải thích generalization ra sao?"
+    }
+  },
+  "highlights": [
+    {
+      "color": "y",
+      "page": 1,
+      "rects": null,
+      "y": 0.3,
+      "text": "the value of the training loss provides few guarantees on model generalization",
+      "note": "Vấn đề: loss train thấp chưa chắc test tốt.",
+      "createdAt": 1793114800000
+    },
+    {
+      "color": "y",
+      "page": 1,
+      "rects": null,
+      "y": 0.33,
+      "text": "simultaneously minimizing loss value and loss sharpness",
+      "note": "Ý tưởng chính trong 1 câu: giảm cả loss và độ nhọn.",
+      "createdAt": 1793114800001
+    },
+    {
+      "color": "b",
+      "page": 1,
+      "rects": null,
+      "y": 0.35,
+      "text": "seeks parameters that lie in neighborhoods having uniformly low loss",
+      "note": "Cả vùng xung quanh đều thấp = cực tiểu phẳng. Xem Hình 1.",
+      "createdAt": 1793114800002
+    },
+    {
+      "color": "y",
+      "page": 2,
+      "rects": null,
+      "y": 0.4,
+      "text": "have thus far been elusive",
+      "note": "Khoảng trống (gap): chưa ai có thuật toán thực tế tìm cực tiểu phẳng.",
+      "createdAt": 1793114800003
+    },
+    {
+      "color": "y",
+      "page": 3,
+      "rects": null,
+      "y": 0.3,
+      "text": "multiple local and even global minima that may yield similar values",
+      "note": "Motivation: nhiều đáy loss train giống nhau nhưng test khác nhau.",
+      "createdAt": 1793114800004
+    },
+    {
+      "color": "b",
+      "page": 3,
+      "rects": null,
+      "y": 0.36,
+      "text": "we seek out parameter values whose entire neighborhoods have uniformly low training loss value",
+      "note": "Đây là định nghĩa của SAM bằng lời, dẫn tới công thức (1).",
+      "createdAt": 1793114800005
+    },
+    {
+      "color": "r",
+      "page": 3,
+      "rects": null,
+      "y": 0.85,
+      "text": "first-order Taylor expansion",
+      "note": "Xấp xỉ #1. Nếu ρ lớn thì Taylor bậc 1 còn đúng không?",
+      "createdAt": 1793114800006
+    },
+    {
+      "color": "r",
+      "page": 4,
+      "rects": null,
+      "y": 0.3,
+      "text": "we drop the second-order terms",
+      "note": "Xấp xỉ #2: bỏ Hessian để tăng tốc.",
+      "createdAt": 1793114800007
+    },
+    {
+      "color": "r",
+      "page": 4,
+      "rects": null,
+      "y": 0.34,
+      "text": "including them surprisingly degrades performance",
+      "note": "Giữ Hessian lại còn tệ hơn? Chưa ai giải thích → ý tưởng nghiên cứu.",
+      "createdAt": 1793114800008
+    },
+    {
+      "color": "r",
+      "page": 5,
+      "rects": null,
+      "y": 0.4,
+      "text": "two backpropagation operations",
+      "note": "Chi phí: mỗi bước tốn gấp đôi SGD.",
+      "createdAt": 1793114800009
+    },
+    {
+      "color": "o",
+      "page": 5,
+      "rects": null,
+      "y": 0.6,
+      "text": "1.6% test error, versus 2.2% error without SAM",
+      "note": "CIFAR-10: giảm khoảng 27% lỗi chỉ bằng cách đổi optimizer.",
+      "createdAt": 1793114800010
+    },
+    {
+      "color": "o",
+      "page": 6,
+      "rects": null,
+      "y": 0.5,
+      "text": "improving the ImageNet top-1 error rate of ResNet-152 from 20.3% to 18.4%",
+      "note": "ImageNet: SAM không overfit khi train lâu hơn, SGD thì có.",
+      "createdAt": 1793114800011
+    },
+    {
+      "color": "o",
+      "page": 9,
+      "rects": null,
+      "y": 0.1,
+      "text": "approximately 24 without SAM, 1.0 with SAM",
+      "note": "Bằng chứng trực tiếp: SAM thật sự tìm được cực tiểu phẳng hơn.",
+      "createdAt": 1793114800012
+    }
+  ]
+}
