@@ -162,6 +162,27 @@ textarea:focus { background: var(--panel); }
 .sum dt { font-weight: 600; }
 .sum dd { margin: 0 0 4px; color: var(--muted); white-space: pre-wrap; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; }
+dialog.lib { border: 1px solid var(--rule); border-radius: 12px; padding: 0; width: min(620px, calc(100% - 32px)); max-height: min(82vh, 720px); background: var(--panel); color: var(--ink); box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+dialog.lib[open] { display: flex; flex-direction: column; }
+dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
+.lib-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--rule); }
+.lib-head h2 { margin: 0; font-size: 16px; }
+.lib-head .count { font: 500 12px var(--font-mono); color: var(--muted); }
+.lib-head .btn { margin-left: auto; }
+.lib-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--rule); font-size: 13px; }
+.lib-tools input[type=search] { flex: 1; min-width: 160px; border: 1px solid var(--rule); border-radius: 7px; padding: 6px 10px; background: var(--desk); }
+.lib-tools label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+.lib-list { list-style: none; margin: 0; padding: 6px 8px; overflow: auto; flex: 1; min-height: 90px; }
+.lib-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px; border-radius: 8px; }
+.lib-row:hover { background: var(--desk); }
+.lib-row.cur { background: var(--soft-b); }
+.lib-open { border: 0; background: transparent; text-align: left; display: grid; gap: 2px; padding: 0; min-width: 0; }
+.lib-open b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-open span { font-size: 12.5px; color: var(--muted); }
+.lib-open:hover b { color: var(--accent); }
+.lib-row .del { border: 1px solid var(--rule); padding: 4px 10px; border-radius: 6px; }
+.lib-foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--rule); }
+.lib-foot .hint { margin-right: auto; }
 .toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--panel); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 60; }
 .loading { color: var(--muted); text-align: center; padding: 40px 0; }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
@@ -172,6 +193,7 @@ textarea:focus { background: var(--panel); }
 <div class="bar">
   <div class="brand"><i aria-hidden="true"></i>Sổ đọc bài báo</div>
   <select id="paperSel" aria-label="Chọn bài báo"><option value="">Chưa có bài báo</option></select>
+  <button class="btn" id="libBtn" type="button" title="Xem, tìm và xoá các bài đã lưu">☰ Thư viện</button>
   <label class="btn primary" for="fileIn">＋ Tải PDF lên</label>
   <input id="fileIn" type="file" accept="application/pdf,.pdf" hidden>
   <span class="group">
@@ -221,6 +243,19 @@ textarea:focus { background: var(--panel); }
     </div>
   </aside>
 </div>
+
+<dialog class="lib" id="libDlg" aria-labelledby="libTitle">
+  <div class="lib-head"><h2 id="libTitle">Thư viện</h2><span class="count" id="libCount"></span><button class="btn" id="libClose" type="button">Đóng</button></div>
+  <div class="lib-tools">
+    <input type="search" id="libSearch" placeholder="Tìm theo tên bài…" aria-label="Tìm bài báo">
+    <label><input type="checkbox" id="libAll"> Chọn tất cả</label>
+  </div>
+  <ul class="lib-list" id="libList"></ul>
+  <div class="lib-foot">
+    <span class="hint" id="libUsage"></span>
+    <button class="danger" id="libDelSel" type="button" disabled>Xoá các bài đã chọn</button>
+  </div>
+</dialog>
 
 <div class="picker" id="picker" hidden role="toolbar" aria-label="Chọn màu tô">
   <button type="button" data-c="y"><i class="sw y"></i>Ý chính</button>
@@ -301,6 +336,7 @@ textarea:focus { background: var(--panel); }
     const putH = (h) => q("h/" + h.id, () => req(os("hls", "readwrite").put(h)));
     return {
       kind: "idb", canUpload: true,
+      hlCount: (pid) => Object.keys(hls[pid] || {}).length,
       watchPapers(cb) { pcb = cb; emitP(); return () => (pcb = null); },
       watchHl(pid, cb) { hcb[pid] = cb; emitH(pid); return () => delete hcb[pid]; },
       async addPaper(file) {
@@ -338,6 +374,7 @@ textarea:focus { background: var(--panel); }
     const emitH = (pid) => hcb[pid] && hcb[pid](Object.values(hls[pid] || {}).map((h) => ({ ...h })));
     return {
       kind: "local", canUpload: true,
+      hlCount: (pid) => Object.keys(hls[pid] || {}).length,
       watchPapers(cb) { pcb = cb; emitP(); return () => (pcb = null); },
       watchHl(pid, cb) { hcb[pid] = cb; emitH(pid); return () => delete hcb[pid]; },
       async addPaper(file) { const id = uid(); papers[id] = { id, title: file.name.replace(/\.pdf$/i, ""), fileName: file.name, createdAt: Date.now(), q: {} }; hls[id] = {}; emitP(); return id; },
@@ -372,7 +409,7 @@ textarea:focus { background: var(--panel); }
   }
   function onPapers(list) {
     papers = list;
-    renderPaperSelect();
+    renderPaperSelect(); renderLibrary();
     const still = current && papers.find((p) => p.id === current.id);
     if (still) { current = still; renderFrame(false); renderSummary(); $("exampleBanner").hidden = !current.example; return; }
     let want = null; try { want = localStorage.getItem("sdbb.last"); } catch (e) {}
@@ -757,9 +794,77 @@ textarea:focus { background: var(--panel); }
     const b = $("delPaper"); if (!current) return;
     if (!b.classList.contains("armed")) { b.classList.add("armed"); b.textContent = "Bấm lần nữa để xoá vĩnh viễn bài báo và mọi ghi chú"; delArm = setTimeout(() => { b.classList.remove("armed"); b.textContent = "Xoá bài báo này"; }, 4000); return; }
     clearTimeout(delArm); b.classList.remove("armed"); b.textContent = "Xoá bài báo này";
-    const p = current; current = null; if (unsubHl) unsubHl(); unsubHl = null;
-    try { localStorage.removeItem("sdbb.last"); } catch (e) {}
-    await store.deletePaper(p, hls); toast("Đã xoá bài báo");
+    await removePaper(current.id); toast("Đã xoá bài báo");
+  });
+  async function removePaper(id) {
+    const p = papers.find((x) => x.id === id); if (!p) return;
+    if (current && current.id === id) {
+      current = null; if (unsubHl) unsubHl(); unsubHl = null;
+      try { localStorage.removeItem("sdbb.last"); } catch (e) {}
+    }
+    await store.deletePaper(p, []);
+  }
+
+  // ---------- library manager ----------
+  const picked = new Set();
+  let libQuery = "", armedId = null, armedT, bulkT;
+  function libVisible() {
+    return papers.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .filter((p) => !libQuery || (p.title || p.fileName || "").toLowerCase().includes(libQuery));
+  }
+  function renderLibrary() {
+    if (!$("libDlg").open) return;
+    for (const id of [...picked]) if (!papers.find((p) => p.id === id)) picked.delete(id);
+    const list = libVisible();
+    $("libCount").textContent = `${papers.length} bài`;
+    $("libList").innerHTML = list.length ? list.map((p) => {
+      const cur = current && current.id === p.id, armed = armedId === p.id;
+      return `<li class="lib-row${cur ? " cur" : ""}">
+        <input type="checkbox" data-id="${p.id}" aria-label="Chọn ${esc(p.title || p.fileName)}"${picked.has(p.id) ? " checked" : ""}>
+        <button type="button" class="lib-open" data-id="${p.id}"><b>${esc(p.title || p.fileName || "Không tên")}</b>
+          <span>${store.hlCount ? store.hlCount(p.id) : 0} ghi chú · ${new Date(p.createdAt || Date.now()).toLocaleDateString("vi-VN")}${cur ? " · đang mở" : ""}</span></button>
+        <button type="button" class="del lib-del${armed ? " armed" : ""}" data-id="${p.id}">${armed ? "Xoá thật?" : "Xoá"}</button></li>`;
+    }).join("") : `<li class="hint">${papers.length ? "Không có bài nào khớp." : "Chưa có bài báo nào."}</li>`;
+    const n = picked.size, b = $("libDelSel");
+    b.disabled = !n;
+    if (!b.classList.contains("armed")) b.textContent = n ? `Xoá ${n} bài đã chọn` : "Xoá các bài đã chọn";
+    $("libAll").checked = list.length > 0 && list.every((p) => picked.has(p.id));
+  }
+  function showUsage() {
+    if (!navigator.storage || !navigator.storage.estimate) return;
+    navigator.storage.estimate().then(({ usage }) => { $("libUsage").textContent = `Đang dùng ${(usage / 1048576).toFixed(1)} MB trên máy này`; }).catch(() => {});
+  }
+  $("libBtn").addEventListener("click", () => {
+    picked.clear(); armedId = null; libQuery = ""; $("libSearch").value = "";
+    $("libDelSel").classList.remove("armed");
+    $("libDlg").showModal(); renderLibrary(); showUsage();
+  });
+  $("libClose").addEventListener("click", () => $("libDlg").close());
+  $("libDlg").addEventListener("click", (e) => { if (e.target === $("libDlg")) $("libDlg").close(); });
+  $("libSearch").addEventListener("input", (e) => { libQuery = e.target.value.trim().toLowerCase(); renderLibrary(); });
+  $("libAll").addEventListener("change", (e) => { libVisible().forEach((p) => (e.target.checked ? picked.add(p.id) : picked.delete(p.id))); renderLibrary(); });
+  $("libList").addEventListener("change", (e) => {
+    const c = e.target.closest("input[type=checkbox]"); if (!c) return;
+    c.checked ? picked.add(c.dataset.id) : picked.delete(c.dataset.id); renderLibrary();
+  });
+  $("libList").addEventListener("click", async (e) => {
+    const open = e.target.closest(".lib-open");
+    if (open) { $("libDlg").close(); openPaper(open.dataset.id); return; }
+    const del = e.target.closest(".lib-del"); if (!del) return;
+    const id = del.dataset.id;
+    if (armedId !== id) { armedId = id; clearTimeout(armedT); armedT = setTimeout(() => { armedId = null; renderLibrary(); }, 3000); renderLibrary(); return; }
+    armedId = null; clearTimeout(armedT); picked.delete(id);
+    await removePaper(id); toast("Đã xoá bài báo"); renderLibrary(); showUsage();
+  });
+  $("libDelSel").addEventListener("click", async () => {
+    const b = $("libDelSel"), ids = [...picked]; if (!ids.length) return;
+    if (!b.classList.contains("armed")) {
+      b.classList.add("armed"); b.textContent = `Bấm lần nữa để xoá vĩnh viễn ${ids.length} bài`;
+      clearTimeout(bulkT); bulkT = setTimeout(() => { b.classList.remove("armed"); renderLibrary(); }, 4000); return;
+    }
+    clearTimeout(bulkT); b.classList.remove("armed");
+    for (const id of ids) await removePaper(id);
+    picked.clear(); toast(`Đã xoá ${ids.length} bài báo`); renderLibrary(); showUsage();
   });
 
   // ---------- summary & export ----------
