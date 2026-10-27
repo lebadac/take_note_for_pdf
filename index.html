@@ -191,6 +191,15 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
 .lib-row .del { border: 1px solid var(--rule); padding: 4px 10px; border-radius: 6px; }
 .lib-foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--rule); }
 .lib-foot .hint { margin-right: auto; }
+.pal-list { list-style: none; margin: 0; padding: 6px 8px; overflow: auto; flex: 1; min-height: 90px; display: grid; gap: 4px; align-content: start; }
+.pal-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 8px; align-items: center; padding: 8px; border-radius: 8px; }
+.pal-row:hover { background: var(--desk); }
+.pal-row input[type=color] { width: 40px; height: 32px; border: 1px solid var(--rule); border-radius: 7px; padding: 2px; background: var(--panel); cursor: pointer; }
+.pal-row input[type=text] { border: 1px solid var(--rule); border-radius: 7px; padding: 6px 8px; background: var(--desk); min-width: 0; width: 100%; }
+.pal-row input[type=text]:focus { background: var(--panel); }
+.pal-row small { grid-column: 2 / -1; color: var(--muted); font-size: 12px; margin-top: -4px; }
+.pal-row .del:disabled { opacity: .4; cursor: not-allowed; }
+@media (max-width: 600px) { .pal-row { grid-template-columns: 42px minmax(0, 1fr) auto; } .pal-row .ph { grid-column: 2 / -1; } }
 .toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--panel); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 60; }
 .loading { color: var(--muted); text-align: center; padding: 40px 0; }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
@@ -202,6 +211,7 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
   <div class="brand"><i aria-hidden="true"></i>Sổ đọc bài báo</div>
   <select id="paperSel" aria-label="Chọn bài báo"><option value="">Chưa có bài báo</option></select>
   <button class="btn" id="libBtn" type="button" title="Xem, tìm và xoá các bài đã lưu">☰ Thư viện</button>
+  <button class="btn" id="palBtn" type="button" title="Đổi màu, đổi nhãn, thêm màu mới">◐ Màu &amp; nhãn</button>
   <label class="btn primary" for="fileIn">＋ Tải PDF lên</label>
   <input id="fileIn" type="file" accept="application/pdf,.pdf" hidden>
   <span class="group">
@@ -265,11 +275,19 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
   </div>
 </dialog>
 
+<dialog class="lib" id="palDlg" aria-labelledby="palTitle">
+  <div class="lib-head"><h2 id="palTitle">Màu &amp; nhãn</h2><span class="count" id="palCount"></span><button class="btn" id="palClose" type="button">Đóng</button></div>
+  <div class="lib-tools"><span>Đổi màu, sửa nhãn và gợi ý ghi chú. Phần trước dấu “·” là chữ hiện trên thanh tô. Thay đổi áp dụng cho mọi bài báo.</span></div>
+  <ul class="pal-list" id="palList"></ul>
+  <div class="lib-foot">
+    <button class="btn" id="palAdd" type="button">＋ Thêm màu</button>
+    <span class="hint" id="palHint"></span>
+    <button class="danger" id="palReset" type="button">Khôi phục mặc định</button>
+  </div>
+</dialog>
+
 <div class="picker" id="picker" hidden role="toolbar" aria-label="Chọn màu tô">
-  <button type="button" data-c="y"><i class="sw y"></i>Ý chính</button>
-  <button type="button" data-c="b"><i class="sw b"></i>Cách làm</button>
-  <button type="button" data-c="o"><i class="sw o"></i>Kết quả</button>
-  <button type="button" data-c="r"><i class="sw r"></i>Hạn chế</button>
+  <span id="pickColors" style="display:contents"></span>
   <span class="tray" id="pickTray" hidden><b id="pickTrayN">0</b> đoạn đang chờ</span>
   <button type="button" data-act="join" id="pickJoin" hidden>＋ Gộp vào <span class="num" id="pickJoinNum"></span></button>
   <button type="button" data-act="unpart" id="pickUnpart" hidden>Bỏ đoạn này</button>
@@ -281,12 +299,21 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
 <script>
 (() => {
   // ---------- constants ----------
-  const COLORS = {
-    y: { name: "Vàng", role: "Bài toán · ý chính", ph: "Câu này nói bài toán / ý chính gì? Viết bằng lời của bạn." },
-    b: { name: "Xanh dương", role: "Cách làm · công thức", ph: "Giải thích cách làm này bằng lời của bạn." },
-    o: { name: "Cam", role: "Kết quả · con số", ph: "Con số này chứng minh điều gì?" },
-    r: { name: "Đỏ", role: "Hạn chế · câu hỏi", ph: "Câu hỏi hoặc điều bạn nghi ngờ ở đây là gì?" },
-  };
+  // Highlight colours. The user can recolour, relabel, add and remove them; the list is saved in browser settings.
+  const DEFAULT_PALETTE = [
+    { key: "y", label: "Bài toán · ý chính", hex: "#f2c200", ph: "Câu này nói bài toán / ý chính gì? Viết bằng lời của bạn." },
+    { key: "b", label: "Cách làm · công thức", hex: "#3b8de0", ph: "Giải thích cách làm này bằng lời của bạn." },
+    { key: "o", label: "Kết quả · con số", hex: "#f08a24", ph: "Con số này chứng minh điều gì?" },
+    { key: "r", label: "Hạn chế · câu hỏi", hex: "#e5485a", ph: "Câu hỏi hoặc điều bạn nghi ngờ ở đây là gì?" },
+  ];
+  const SPARE_HEX = ["#8e6bd8", "#2fa37a", "#e06fb0", "#16a3b8", "#a0682d", "#7a8794"];
+  const MAX_PALETTE = 10;
+  let palette = DEFAULT_PALETTE.map((c) => ({ ...c }));
+  const col = (k) => palette.find((c) => c.key === k) || { key: k, label: "Màu đã xoá", hex: "#9aa5ae", ph: "" };
+  const shortLabel = (c) => (c.label.split("·")[0].trim() || c.label || "Màu");
+  const hexRgb = (hex) => { const n = parseInt(String(hex).replace("#", ""), 16) || 0; return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const inkRgb = (hex) => hexRgb(hex).map((v) => Math.round(v * 0.78)); // darker shade for number badges
+  const validKey = (k) => typeof k === "string" && /^[a-z][a-z0-9]{0,15}$/.test(k);
   const QUESTIONS = [
     ["problem", "Bài toán là gì?", "Họ đang giải quyết vấn đề nào?"],
     ["motivation", "Motivation", "Vì sao vấn đề quan trọng? Cách cũ thiếu gì?"],
@@ -325,12 +352,13 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
   // Saves everything in this browser's IndexedDB: papers, their PDF bytes, and highlights.
   function openIdb() {
     return new Promise((ok, fail) => {
-      const r = indexedDB.open("so-doc-bai-bao", 1);
+      const r = indexedDB.open("so-doc-bai-bao", 2);
       r.onupgradeneeded = () => {
-        const d = r.result;
-        d.createObjectStore("papers", { keyPath: "id" });
-        d.createObjectStore("files", { keyPath: "id" });
-        d.createObjectStore("hls", { keyPath: "id" }).createIndex("paperId", "paperId");
+        const d = r.result, has = (n) => d.objectStoreNames.contains(n);
+        if (!has("papers")) d.createObjectStore("papers", { keyPath: "id" });
+        if (!has("files")) d.createObjectStore("files", { keyPath: "id" });
+        if (!has("hls")) d.createObjectStore("hls", { keyPath: "id" }).createIndex("paperId", "paperId");
+        if (!has("settings")) d.createObjectStore("settings", { keyPath: "id" });
       };
       r.onsuccess = () => ok(r.result); r.onerror = () => fail(r.error);
     });
@@ -349,6 +377,9 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     return {
       kind: "idb", canUpload: true,
       hlCount: (pid) => Object.keys(hls[pid] || {}).length,
+      colorUsage: (key) => Object.values(hls).reduce((n, m) => n + Object.values(m).filter((h) => h.color === key).length, 0),
+      getSetting: (id) => req(os("settings").get(id)),
+      putSetting: (obj) => q("s/" + obj.id, () => req(os("settings", "readwrite").put(obj))),
       watchPapers(cb) { pcb = cb; emitP(); return () => (pcb = null); },
       watchHl(pid, cb) { hcb[pid] = cb; emitH(pid); return () => delete hcb[pid]; },
       async addPaper(file) {
@@ -387,6 +418,9 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     return {
       kind: "local", canUpload: true,
       hlCount: (pid) => Object.keys(hls[pid] || {}).length,
+      colorUsage: (key) => Object.values(hls).reduce((n, m) => n + Object.values(m).filter((h) => h.color === key).length, 0),
+      getSetting: async () => null,
+      putSetting: async () => {},
       watchPapers(cb) { pcb = cb; emitP(); return () => (pcb = null); },
       watchHl(pid, cb) { hcb[pid] = cb; emitH(pid); return () => delete hcb[pid]; },
       async addPaper(file) { const id = uid(); papers[id] = { id, title: file.name.replace(/\.pdf$/i, ""), fileName: file.name, createdAt: Date.now(), q: {} }; hls[id] = {}; emitP(); return id; },
@@ -781,9 +815,9 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
   // ---------- notes panel ----------
   const noteTimers = {};
   function renderFilters() {
-    const cnt = { y: 0, b: 0, o: 0, r: 0 }; hls.forEach((h) => cnt[h.color] !== undefined && cnt[h.color]++);
+    const cnt = {}; hls.forEach((h) => (cnt[h.color] = (cnt[h.color] || 0) + 1));
     $("filters").innerHTML = `<button class="chip" data-f="all" aria-pressed="${filter === "all"}">Tất cả <span class="cnt">${hls.length}</span></button>` +
-      Object.keys(COLORS).map((c) => `<button class="chip" data-f="${c}" aria-pressed="${filter === c}"><i class="sw ${c}"></i>${COLORS[c].role} <span class="cnt">${cnt[c]}</span></button>`).join("");
+      colorKeys().map((c) => `<button class="chip" data-f="${c}" aria-pressed="${filter === c}"><i class="sw ${c}"></i>${esc(col(c).label)} <span class="cnt">${cnt[c] || 0}</span></button>`).join("");
   }
   $("filters").addEventListener("click", (e) => { const b = e.target.closest("[data-f]"); if (!b) return; filter = b.dataset.f; renderFilters(); renderNotes(); drawAllHighlights(); });
 
@@ -800,7 +834,7 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
       if (!el) {
         el = document.createElement("div"); el.dataset.id = h.id;
         el.innerHTML = `<div class="note-head"><span class="num"></span><span class="pg"></span>
-          <span class="dots">${Object.keys(COLORS).map((c) => `<button type="button" class="dot ${c}" data-c="${c}" aria-label="Đổi sang màu ${COLORS[c].name}"></button>`).join("")}</span>
+          <span class="dots"></span>
           <button type="button" class="del">Xoá</button></div>
           <p class="quote" title="Bấm để tới chỗ này trong bài"></p><span class="unanchored" hidden>Chưa tìm thấy vị trí trong bài</span>
           <textarea rows="2" aria-label="Ghi chú"></textarea>`;
@@ -825,11 +859,15 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
       el.className = `note ${h.color}${h.id === activeId ? " active" : ""}`;
       el.querySelector(".num").className = `num ${h.color}`; el.querySelector(".num").textContent = nums[h.id];
       const nParts = segments(h).length;
-      el.querySelector(".pg").textContent = `tr. ${pagesOf(h).join(", ")} · ${COLORS[h.color].role}${nParts > 1 ? ` · ${nParts} đoạn` : ""}`;
+      el.querySelector(".pg").textContent = `tr. ${pagesOf(h).join(", ")} · ${col(h.color).label}${nParts > 1 ? ` · ${nParts} đoạn` : ""}`;
+      if (el.dataset.pv !== String(paletteVersion)) {
+        el.dataset.pv = paletteVersion;
+        el.querySelector(".dots").innerHTML = palette.map((c) => `<button type="button" class="dot ${c.key}" data-c="${c.key}" title="${esc(c.label)}" aria-label="Đổi sang ${esc(c.label)}"></button>`).join("");
+      }
       el.querySelectorAll(".dot").forEach((d) => d.setAttribute("aria-pressed", String(d.dataset.c === h.color)));
       el.querySelector(".quote").textContent = "“" + fullText(h) + "”";
       el.querySelector(".unanchored").hidden = !!h.rects;
-      const ta = el.querySelector("textarea"); ta.placeholder = COLORS[h.color].ph;
+      const ta = el.querySelector("textarea"); ta.placeholder = col(h.color).ph || "Ghi chú bằng lời của bạn…";
       if (document.activeElement !== ta && drafts[h.id] === undefined && ta.value !== (h.note || "")) ta.value = h.note || "";
       frag.push(el);
     });
@@ -959,9 +997,9 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     const nums = numbering(); const s = sorted();
     let md = `# ${current.title || "Bài báo"}\n\n`;
     QUESTIONS.forEach(([k, label]) => { const v = current.q && current.q[k]; if (v) md += `**${label}:** ${v}\n\n`; });
-    Object.keys(COLORS).forEach((c) => {
+    colorKeys().forEach((c) => {
       const items = s.filter((h) => h.color === c); if (!items.length) return;
-      md += `## ${COLORS[c].role}\n\n`;
+      md += `## ${col(c).label}\n\n`;
       items.forEach((h) => { md += `${nums[h.id]}. (tr. ${pagesOf(h).join(", ")}) “${fullText(h)}”` + (h.note ? `\n   → ${h.note}` : "") + "\n"; });
       md += "\n";
     });
@@ -974,9 +1012,9 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     let html = "";
     const answered = QUESTIONS.filter(([k]) => current.q && current.q[k]);
     html += `<h3>Khung đọc</h3>` + (answered.length ? `<dl>${answered.map(([k, l]) => `<dt>${l}</dt><dd>${esc(current.q[k])}</dd>`).join("")}</dl>` : `<p class="hint">Chưa điền. Vào tab Khung đọc để trả lời 7 câu hỏi.</p>`);
-    Object.keys(COLORS).forEach((c) => {
+    colorKeys().forEach((c) => {
       const items = s.filter((h) => h.color === c);
-      html += `<h3><i class="sw ${c}"></i>${COLORS[c].role} <span class="hint">(${items.length})</span></h3>`;
+      html += `<h3><i class="sw ${c}"></i>${esc(col(c).label)} <span class="hint">(${items.length})</span></h3>`;
       html += items.length ? `<ol>${items.map((h) => `<li value="${nums[h.id]}"><span class="qt">“${esc(fullText(h))}”</span> <span class="hint">tr. ${pagesOf(h).join(", ")}</span>${h.note ? `<br><span class="nt">→ ${esc(h.note)}</span>` : ""}</li>`).join("")}</ol>` : `<p class="hint">Chưa có. Mục trống là phần bạn nên đọc lại.</p>`;
     });
     box.innerHTML = html;
@@ -998,15 +1036,27 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
   $("dlMd").addEventListener("click", () => current && save(safeName() + ".md", buildMarkdown()));
   // The notes format shared by the .json export and the data embedded in an exported PDF.
   function notesData() {
+    const used = new Set(hls.map((h) => h.color));
     return { app: "so-doc-bai-bao", version: 1, paper: { title: current.title, fileName: current.fileName, q: current.q || {} },
+      palette: palette.filter((c) => used.has(c.key)),
       highlights: sorted().map(({ color, page, rects, y, text, note, createdAt, extra }) => ({ color, page, rects: rects || null, y: y ?? null, text, note, createdAt, extra: extra || [] })) };
   }
   async function applyNotes(pid, data) {
     if (!data || !Array.isArray(data.highlights)) throw new Error("format");
     if (data.paper && data.paper.q) await store.updatePaper(pid, { q: data.paper.q });
+    // colours from the file that this browser does not know yet are added to the palette (yours win on the same key)
+    let added = false;
+    const incoming = Array.isArray(data.palette) ? data.palette : [];
+    for (const h of data.highlights) {
+      if (!validKey(h.color) || palette.some((c) => c.key === h.color)) continue;
+      const src = incoming.find((c) => c && c.key === h.color) || {};
+      palette.push({ key: h.color, label: String(src.label || "Màu nhập vào").slice(0, 60), hex: /^#[0-9a-f]{6}$/i.test(src.hex) ? src.hex : SPARE_HEX[palette.length % SPARE_HEX.length], ph: String(src.ph || "").slice(0, 200) });
+      added = true;
+    }
+    if (added) savePalette();
     let n = 0;
     for (const h of data.highlights) {
-      if (!COLORS[h.color] || typeof h.page !== "number") continue;
+      if (!validKey(h.color) || typeof h.page !== "number") continue;
       const extra = (Array.isArray(h.extra) ? h.extra : []).filter((x) => x && typeof x.page === "number" && Array.isArray(x.rects))
         .map((x) => ({ page: x.page, rects: x.rects, text: String(x.text || "").slice(0, 2000) }));
       store.addHl(pid, { color: h.color, page: h.page, rects: Array.isArray(h.rects) ? h.rects : null, y: typeof h.y === "number" ? h.y : 0.5, text: String(h.text || "").slice(0, 2000), note: String(h.note || ""), createdAt: h.createdAt || Date.now(), extra });
@@ -1038,8 +1088,8 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
     } catch (e) { console.warn("no embedded notes", e); return null; }
     finally { if (d) d.destroy(); }
   }
-  const PDF_FILL = { y: [1, 0.85, 0.2], b: [0.33, 0.65, 1], o: [1, 0.57, 0.18], r: [1, 0.32, 0.39] };
-  const PDF_INK = { y: [0.79, 0.59, 0], b: [0.17, 0.45, 0.75], o: [0.83, 0.42, 0.08], r: [0.81, 0.24, 0.3] };
+  const pdfFill = (k) => hexRgb(col(k).hex).map((v) => v / 255);
+  const pdfInk = (k) => inkRgb(col(k).hex).map((v) => v / 255);
   const GREEK = { "ρ": "rho", "η": "eta", "λ": "lambda", "ε": "eps", "θ": "theta", "σ": "sigma", "α": "alpha", "β": "beta", "γ": "gamma", "δ": "delta", "μ": "mu", "π": "pi", "∇": "grad ", "‖": "||", "≈": "~", "→": "->", "≤": "<=", "≥": ">=", "×": "x", "∑": "sum", "·": ".", "≜": ":=", "∈": "in", "“": "\"", "”": "\"", "–": "-", "—": "-" };
   function loadScript(src) {
     return new Promise((ok, fail) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = fail; document.head.appendChild(s); });
@@ -1122,10 +1172,10 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
         const cb = page.getCropBox();
         if (rot === 0) {
           onPage.forEach((h) => segments(h).filter((sg) => sg.page === p + 1 && sg.rects && sg.rects.length).forEach((sg) => {
-            sg.rects.forEach(([x, y, w, hh]) => page.drawRectangle({ x: cb.x + x * cb.width, y: cb.y + cb.height - (y + hh) * cb.height, width: w * cb.width, height: hh * cb.height, color: C(PDF_FILL[h.color]), opacity: 0.38, blendMode: BlendMode.Multiply }));
+            sg.rects.forEach(([x, y, w, hh]) => page.drawRectangle({ x: cb.x + x * cb.width, y: cb.y + cb.height - (y + hh) * cb.height, width: w * cb.width, height: hh * cb.height, color: C(pdfFill(h.color)), opacity: 0.38, blendMode: BlendMode.Multiply }));
             const [x, y] = sg.rects[0];
             const bx = Math.max(cb.x + 6, cb.x + x * cb.width - 7), by = cb.y + cb.height - y * cb.height - 4;
-            page.drawCircle({ x: bx, y: by, size: 5.5, color: C(PDF_INK[h.color]) });
+            page.drawCircle({ x: bx, y: by, size: 5.5, color: C(pdfInk(h.color)) });
             const label = String(nums[h.id]); const s = 6.5;
             page.drawText(label, { x: bx - fB.widthOfTextAtSize(label, s) / 2, y: by - s * 0.35, size: s, font: fB, color: rgb(1, 1, 1) });
           }));
@@ -1151,7 +1201,7 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
             page.drawText(clean("… xem tiếp ở trang tóm tắt cuối file"), { x: mx + 12, y: cb.y + 12, size: 7, font: fR, color: rgb(0.45, 0.5, 0.55) });
             overflow = true; break;
           }
-          page.drawCircle({ x: mx + 16, y: top - 3, size: 5.5, color: C(PDF_INK[h.color]) });
+          page.drawCircle({ x: mx + 16, y: top - 3, size: 5.5, color: C(pdfInk(h.color)) });
           const label = String(nums[h.id]);
           page.drawText(label, { x: mx + 16 - fB.widthOfTextAtSize(label, 6.5) / 2, y: top - 5.3, size: 6.5, font: fB, color: rgb(1, 1, 1) });
           lines.forEach((ln, k) => page.drawText(ln, { x: tx, y: top - 5.5 - k * lh, size, font: fR, color: h.note ? rgb(0.1, 0.14, 0.17) : rgb(0.42, 0.47, 0.52) }));
@@ -1175,15 +1225,15 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
         answered.forEach(([k, label]) => { text(label, { font: fB, size: 9.5 }); text(current.q[k], { size: 9.5, indent: 10 }); y -= 5; });
         y -= 8;
       }
-      Object.keys(COLORS).forEach((c) => {
+      colorKeys().forEach((c) => {
         const items = all.filter((h) => h.color === c); if (!items.length) return;
         need(30);
-        pg.drawRectangle({ x: L, y: y - 11, width: 9, height: 9, color: C(PDF_INK[c]) });
-        pg.drawText(clean(COLORS[c].role), { x: L + 15, y: y - 10.5, size: 12, font: fB, color: rgb(0.1, 0.14, 0.17) });
+        pg.drawRectangle({ x: L, y: y - 11, width: 9, height: 9, color: C(pdfInk(c)) });
+        pg.drawText(clean(col(c).label), { x: L + 15, y: y - 10.5, size: 12, font: fB, color: rgb(0.1, 0.14, 0.17) });
         y -= 20;
         items.forEach((h) => {
           text(`${nums[h.id]}. (tr. ${pagesOf(h).join(", ")}) “${fullText(h)}”`, { size: 9.2, color: rgb(0.25, 0.3, 0.35) });
-          if (h.note) text("→ " + h.note, { size: 9.5, indent: 12, color: C(PDF_INK[c]) });
+          if (h.note) text("→ " + h.note, { size: 9.5, indent: 12, color: C(pdfInk(c)) });
           y -= 5;
         });
         y -= 8;
@@ -1264,15 +1314,102 @@ dialog.lib::backdrop { background: rgba(10, 20, 30, .42); }
   let lastW = 0, rT;
   new ResizeObserver(() => { const w = $("viewer").clientWidth; if (Math.abs(w - lastW) < 30) return; lastW = w; clearTimeout(rT); rT = setTimeout(() => pdf && setZoom(zoom), 200); }).observe($("viewer"));
 
+  // ---------- colours & labels ----------
+  let paletteVersion = 0;
+  // palette order first, then any colour still used by a highlight but missing from the palette
+  function colorKeys() { const ks = palette.map((c) => c.key); hls.forEach((h) => { if (!ks.includes(h.color)) ks.push(h.color); }); return ks; }
+  function applyPalette() {
+    paletteVersion++;
+    let el = document.getElementById("paletteCss");
+    if (!el) { el = document.createElement("style"); el.id = "paletteCss"; document.head.appendChild(el); }
+    el.textContent = colorKeys().filter(validKey).map((k) => {
+      const c = col(k), [r, g, b] = hexRgb(c.hex), [ir, ig, ib] = inkRgb(c.hex);
+      return `.hl.${k}{background:rgba(${r},${g},${b},.42)}.hl-badge.${k},.num.${k}{background:rgb(${ir},${ig},${ib})}.note.${k}{border-left:4px solid ${c.hex}}.sw.${k},.dot.${k}{background:${c.hex}}`;
+    }).join("\n");
+    $("pickColors").innerHTML = palette.map((c) => `<button type="button" data-c="${c.key}" title="${esc(c.label)}"><i class="sw ${c.key}"></i>${esc(shortLabel(c))}</button>`).join("");
+    drawAllHighlights(); renderNotes(); renderSummary();
+  }
+  let palSaveT;
+  function savePalette() {
+    applyPalette();
+    clearTimeout(palSaveT);
+    palSaveT = setTimeout(() => store && store.putSetting({ id: "palette", items: palette.map(({ key, label, hex, ph }) => ({ key, label, hex, ph })) }), 400);
+  }
+  async function loadPalette() {
+    try {
+      const saved = await store.getSetting("palette");
+      if (saved && Array.isArray(saved.items) && saved.items.length) palette = saved.items.filter((c) => validKey(c.key) && /^#[0-9a-f]{6}$/i.test(c.hex));
+    } catch (e) { console.warn("palette", e); }
+    if (!palette.length) palette = DEFAULT_PALETTE.map((c) => ({ ...c }));
+    applyPalette();
+  }
+  function renderPalDialog() {
+    if (!$("palDlg").open) return;
+    $("palCount").textContent = `${palette.length} màu`;
+    $("palList").innerHTML = palette.map((c, i) => {
+      const used = store.colorUsage(c.key);
+      const lock = used > 0 || palette.length <= 1;
+      return `<li class="pal-row" data-i="${i}">
+        <input type="color" value="${c.hex}" data-f="hex" aria-label="Màu của ${esc(c.label)}">
+        <input type="text" value="${esc(c.label)}" data-f="label" maxlength="60" placeholder="Nhãn, ví dụ: Định nghĩa · khái niệm" aria-label="Nhãn">
+        <input type="text" class="ph" value="${esc(c.ph)}" data-f="ph" maxlength="200" placeholder="Gợi ý trong ô ghi chú (không bắt buộc)" aria-label="Gợi ý ghi chú">
+        <button type="button" class="del" data-del="${c.key}" ${lock ? "disabled" : ""} title="${used ? `Đang dùng ở ${used} chỗ tô. Đổi màu các chỗ đó trước khi xoá.` : palette.length <= 1 ? "Cần giữ ít nhất 1 màu" : "Xoá màu này"}">Xoá</button>
+        <small>${used ? `Đang dùng ở ${used} chỗ tô` : "Chưa dùng"} · trên thanh tô hiện: “${esc(shortLabel(c))}”</small></li>`;
+    }).join("");
+    $("palAdd").disabled = palette.length >= MAX_PALETTE;
+    $("palHint").textContent = palette.length >= MAX_PALETTE ? `Tối đa ${MAX_PALETTE} màu` : "";
+  }
+  $("palBtn").addEventListener("click", () => { $("palDlg").showModal(); renderPalDialog(); });
+  $("palClose").addEventListener("click", () => $("palDlg").close());
+  $("palDlg").addEventListener("click", (e) => { if (e.target === $("palDlg")) $("palDlg").close(); });
+  $("palList").addEventListener("input", (e) => {
+    const inp = e.target.closest("[data-f]"); if (!inp) return;
+    const c = palette[+inp.closest(".pal-row").dataset.i]; if (!c) return;
+    c[inp.dataset.f] = inp.dataset.f === "label" ? inp.value.trim() || "Màu" : inp.value;
+    const small = inp.closest(".pal-row").querySelector("small");
+    if (small && inp.dataset.f === "label") small.textContent = small.textContent.replace(/“.*”$/, `“${shortLabel(c)}”`);
+    savePalette();
+  });
+  let palDelKey = null, palDelT, resetT;
+  $("palList").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-del]"); if (!b || b.disabled) return;
+    const key = b.dataset.del;
+    if (palDelKey !== key) { palDelKey = key; b.classList.add("armed"); b.textContent = "Xoá thật?"; clearTimeout(palDelT); palDelT = setTimeout(() => { palDelKey = null; renderPalDialog(); }, 3000); return; }
+    palDelKey = null; clearTimeout(palDelT);
+    if (store.colorUsage(key) > 0) { toast("Màu này đang được dùng, đổi màu các chỗ tô trước"); renderPalDialog(); return; }
+    palette = palette.filter((c) => c.key !== key);
+    if (filter === key) filter = "all";
+    savePalette(); renderPalDialog(); toast("Đã xoá màu");
+  });
+  $("palAdd").addEventListener("click", () => {
+    if (palette.length >= MAX_PALETTE) return;
+    const hex = SPARE_HEX.find((h) => !palette.some((c) => c.hex.toLowerCase() === h)) || SPARE_HEX[palette.length % SPARE_HEX.length];
+    let key; do { key = "c" + Math.random().toString(36).slice(2, 7); } while (palette.some((c) => c.key === key));
+    palette.push({ key, label: "Màu mới", hex, ph: "" });
+    savePalette(); renderPalDialog();
+    const rows = $("palList").querySelectorAll('input[data-f="label"]'); const last = rows[rows.length - 1];
+    if (last) { last.focus(); last.select(); }
+  });
+  $("palReset").addEventListener("click", () => {
+    const b = $("palReset");
+    if (!b.classList.contains("armed")) { b.classList.add("armed"); b.textContent = "Bấm lần nữa để khôi phục"; clearTimeout(resetT); resetT = setTimeout(() => { b.classList.remove("armed"); b.textContent = "Khôi phục mặc định"; }, 4000); return; }
+    clearTimeout(resetT); b.classList.remove("armed"); b.textContent = "Khôi phục mặc định";
+    // custom colours still in use are kept so no highlight loses its colour
+    const keep = palette.filter((c) => !DEFAULT_PALETTE.some((d) => d.key === c.key) && store.colorUsage(c.key) > 0);
+    palette = DEFAULT_PALETTE.map((c) => ({ ...c })).concat(keep);
+    savePalette(); renderPalDialog(); toast(keep.length ? `Đã khôi phục 4 màu mặc định, giữ lại ${keep.length} màu đang dùng` : "Đã khôi phục màu mặc định");
+  });
+
   // ---------- boot ----------
   async function boot() {
     try { store = await IdbStore(await openIdb()); }
     catch (e) { console.warn("IndexedDB unavailable", e); store = LocalStore(); }
     if (store.kind === "idb" && navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
     setStatus(store.kind === "idb" ? "Đã lưu trên máy này" : "Chế độ tạm (chưa lưu)", store.kind === "idb" ? "ok" : "warn");
+    await loadPalette();
     store.watchPapers(onPapers);
   }
-  renderFrame(true); renderNotes(); renderSummary();
+  applyPalette(); renderFrame(true);
   boot();
 })();
 </script>
